@@ -4,6 +4,7 @@ import json
 import os
 import random
 import string
+import base64
 from datetime import datetime
 from urllib.parse import parse_qs
 
@@ -541,8 +542,24 @@ def payload(data: dict) -> dict:
     }
 
 
-def scan_qr(uploaded_file) -> str:
-    image_bytes = uploaded_file.read()
+def decode_pasted_image(data_url: str) -> bytes:
+        if not data_url:
+                return b""
+
+        raw = data_url.strip()
+        if raw.startswith("data:") and "," in raw:
+                raw = raw.split(",", 1)[1]
+
+        try:
+                return base64.b64decode(raw, validate=True)
+        except Exception:
+                return b""
+
+
+def scan_qr_bytes(image_bytes: bytes) -> str:
+    if not image_bytes:
+        return ""
+
     file_array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(file_array, cv2.IMREAD_COLOR)
     if image is None:
@@ -553,23 +570,28 @@ def scan_qr(uploaded_file) -> str:
     # Try default decode first.
     decoded_text, _, _ = detector.detectAndDecode(image)
     if decoded_text:
-      return decoded_text.strip()
+        return decoded_text.strip()
 
     # Fallback: grayscale and high-contrast threshold can recover hard-to-read QR images.
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     decoded_text, _, _ = detector.detectAndDecode(binary)
     if decoded_text:
-      return decoded_text.strip()
+        return decoded_text.strip()
 
     # Last fallback: detect multiple QR codes and use the first decoded item.
     ok, decoded_list, _, _ = detector.detectAndDecodeMulti(image)
     if ok and decoded_list:
-      for item in decoded_list:
-        if item:
-          return item.strip()
+        for item in decoded_list:
+            if item:
+                return item.strip()
 
     return ""
+
+
+def scan_qr(uploaded_file) -> str:
+    image_bytes = uploaded_file.read()
+    return scan_qr_bytes(image_bytes)
 
 
 @app.route("/auth-token", methods=["POST"])
@@ -653,12 +675,20 @@ def index():
 
     if action == "scan":
         qr_file = request.files.get("qr_file")
-        if not qr_file or not qr_file.filename:
+        pasted_data = request.form.get("qr_paste_data", "").strip()
+        image_bytes = b""
+
+        if qr_file and qr_file.filename:
+            image_bytes = qr_file.read()
+        elif pasted_data:
+            image_bytes = decode_pasted_image(pasted_data)
+
+        if not image_bytes:
             status = "ERROR: No file selected"
-            log_lines.append("Please upload an image file first.")
+            log_lines.append("Please upload or paste an image file first.")
         else:
             clear_autofilled_fields(data)
-            raw = scan_qr(qr_file)
+            raw = scan_qr_bytes(image_bytes)
             if raw:
                 status = "QR DETECTED"
                 data["qr_raw"] = raw[:80]
@@ -1019,7 +1049,9 @@ TEMPLATE = """
       <div class=\"panel\" style=\"margin-top:12px\">
         <h3>QR Upload</h3>
         <div class=\"row\">
-          <div class=\"field full\"><label>Upload Image</label><input type=\"file\" name=\"qr_file\" accept=\".jpg,.jpeg,.png,.bmp,.gif\"></div>
+          <div class=\"field full\"><label>Upload Image or Paste (Ctrl+V)</label><input id=\"qrFileInput\" type=\"file\" name=\"qr_file\" accept=\".jpg,.jpeg,.png,.bmp,.gif\"></div>
+          <input type=\"hidden\" id=\"qrPasteData\" name=\"qr_paste_data\" value=\"\">
+          <div class=\"field full\"><label>Paste Status</label><input id=\"qrPasteStatus\" value=\"No pasted image\" readonly></div>
           <div class=\"field full\"><label>QR Raw</label><input name=\"qr_raw\" value=\"{{data.qr_raw}}\" readonly></div>
         </div>
         <div class=\"actions\">
@@ -1160,6 +1192,61 @@ TEMPLATE = """
         const authUsernameInput = document.getElementById("authUsername");
         const authPasswordInput = document.getElementById("authPassword");
         const authChannelInput = document.getElementById("authChannel");
+        const qrFileInput = document.getElementById("qrFileInput");
+        const qrPasteData = document.getElementById("qrPasteData");
+        const qrPasteStatus = document.getElementById("qrPasteStatus");
+
+        function setPasteStatus(message) {
+            if (qrPasteStatus) {
+                qrPasteStatus.value = message;
+            }
+        }
+
+        if (qrFileInput && qrPasteData) {
+            qrFileInput.addEventListener("change", function () {
+                if (qrFileInput.files && qrFileInput.files.length > 0) {
+                    qrPasteData.value = "";
+                    setPasteStatus("Using selected file upload");
+                }
+            });
+        }
+
+        document.addEventListener("paste", function (event) {
+            if (!event.clipboardData || !qrPasteData) {
+                return;
+            }
+
+            const items = event.clipboardData.items || [];
+            for (const item of items) {
+                if (!item.type || !item.type.startsWith("image/")) {
+                    continue;
+                }
+
+                const file = item.getAsFile();
+                if (!file) {
+                    continue;
+                }
+
+                const reader = new FileReader();
+                reader.onload = function (loadEvent) {
+                    const result = loadEvent.target && loadEvent.target.result ? String(loadEvent.target.result) : "";
+                    if (!result) {
+                        setPasteStatus("Paste failed, try again");
+                        return;
+                    }
+                    qrPasteData.value = result;
+                    if (qrFileInput) {
+                        qrFileInput.value = "";
+                    }
+                    setPasteStatus("Pasted image ready for scan");
+                };
+                reader.onerror = function () {
+                    setPasteStatus("Paste failed, try again");
+                };
+                reader.readAsDataURL(file);
+                return;
+            }
+        });
 
         // Function to update endpoints AND credentials based on bank and txn_type
         function updateEndpoints() {
