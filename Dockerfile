@@ -19,6 +19,6 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . .
 
-EXPOSE 5000
+EXPOSE 7860
 
-CMD ["sh", "-c", "gunicorn -w 2 -k gthread -b 0.0.0.0:${PORT:-5000} qr_payment:app"]
+CMD ["sh", "-c", "gunicorn -w 2 -k gthread -b 0.0.0.0:${PORT:-7860} qr_payment:app"]
