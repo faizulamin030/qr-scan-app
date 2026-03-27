@@ -948,6 +948,22 @@ TEMPLATE = """
             resize: vertical;
             line-height: 1.4;
         }
+        .paste-zone {
+            border: 1px dashed var(--line-strong);
+            border-radius: 8px;
+            padding: 12px;
+            min-height: 56px;
+            color: var(--muted);
+            background: rgba(125, 211, 252, 0.04);
+            display: flex;
+            align-items: center;
+        }
+        .paste-zone:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+            color: var(--txt);
+        }
         .modal {
             position: fixed;
             inset: 0;
@@ -1050,6 +1066,7 @@ TEMPLATE = """
         <h3>QR Upload</h3>
         <div class=\"row\">
           <div class=\"field full\"><label>Upload Image or Paste (Ctrl+V)</label><input id=\"qrFileInput\" type=\"file\" name=\"qr_file\" accept=\".jpg,.jpeg,.png,.bmp,.gif\"></div>
+                    <div class=\"field full\"><label>Paste Screenshot Area</label><div id=\"qrPasteZone\" class=\"paste-zone\" tabindex=\"0\">Click here and press Ctrl+V to paste screenshot</div></div>
           <input type=\"hidden\" id=\"qrPasteData\" name=\"qr_paste_data\" value=\"\">
           <div class=\"field full\"><label>Paste Status</label><input id=\"qrPasteStatus\" value=\"No pasted image\" readonly></div>
           <div class=\"field full\"><label>QR Raw</label><input name=\"qr_raw\" value=\"{{data.qr_raw}}\" readonly></div>
@@ -1193,6 +1210,7 @@ TEMPLATE = """
         const authPasswordInput = document.getElementById("authPassword");
         const authChannelInput = document.getElementById("authChannel");
         const qrFileInput = document.getElementById("qrFileInput");
+        const qrPasteZone = document.getElementById("qrPasteZone");
         const qrPasteData = document.getElementById("qrPasteData");
         const qrPasteStatus = document.getElementById("qrPasteStatus");
 
@@ -1211,9 +1229,9 @@ TEMPLATE = """
             });
         }
 
-        document.addEventListener("paste", function (event) {
+        function handleImagePaste(event) {
             if (!event.clipboardData || !qrPasteData) {
-                return;
+                return false;
             }
 
             const items = event.clipboardData.items || [];
@@ -1226,6 +1244,8 @@ TEMPLATE = """
                 if (!file) {
                     continue;
                 }
+
+                event.preventDefault();
 
                 const reader = new FileReader();
                 reader.onload = function (loadEvent) {
@@ -1244,9 +1264,27 @@ TEMPLATE = """
                     setPasteStatus("Paste failed, try again");
                 };
                 reader.readAsDataURL(file);
-                return;
+                return true;
             }
+
+            setPasteStatus("Clipboard has no image. Copy a screenshot first.");
+            return false;
+        }
+
+        document.addEventListener("paste", function (event) {
+            handleImagePaste(event);
         });
+
+        if (qrPasteZone) {
+            qrPasteZone.addEventListener("paste", function (event) {
+                handleImagePaste(event);
+            });
+
+            qrPasteZone.addEventListener("click", function () {
+                qrPasteZone.focus();
+                setPasteStatus("Press Ctrl+V to paste screenshot");
+            });
+        }
 
         // Function to update endpoints AND credentials based on bank and txn_type
         function updateEndpoints() {
