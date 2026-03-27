@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: qr-scan-app
+    env: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /
